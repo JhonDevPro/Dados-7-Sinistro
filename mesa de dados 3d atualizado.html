@@ -1,3 +1,5 @@
+corrija esse codigo pra mim, observe que o resuldado da soma dos dados não aparece depois do =
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -10,49 +12,16 @@
             text-align: center;
             background-color: #222;
             color: white;
+            margin: 0;
+            overflow-x: hidden;
         }
         .controls {
             margin: 20px;
         }
-        .dice-container {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
+        #diceCanvas {
+            width: 100%;
+            height: 500px;
             margin-top: 20px;
-        }
-        .dice {
-            width: 80px;
-            height: 80px;
-            margin: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            font-weight: bold;
-            color: black;
-            background-color: white;
-            border: 3px solid black;
-            border-radius: 10px;
-            position: relative;
-            transform: rotate(0deg);
-            animation: rollAnimation 1s ease-out;
-        }
-        @keyframes rollAnimation {
-            0% { transform: rotate(0deg); }
-            25% { transform: rotate(90deg); }
-            50% { transform: rotate(180deg); }
-            75% { transform: rotate(270deg); }
-            100% { transform: rotate(360deg); }
-        }
-        button, select, input {
-            padding: 10px;
-            font-size: 16px;
-            margin: 5px;
-            cursor: pointer;
-            background: #444;
-            color: white;
-            border: none;
-            border-radius: 5px;
         }
         .npc-list {
             margin-top: 20px;
@@ -68,6 +37,7 @@
         }
         .npc-entry span {
             margin-left: 10px;
+            font-size: 16px;
         }
         .remove-btn {
             background: red;
@@ -76,13 +46,41 @@
             cursor: pointer;
         }
         .advantage-input {
-            width: 40px;
+            width: 50px;
             margin-left: 10px;
+        }
+        button, select, input {
+            padding: 10px;
+            font-size: 16px;
+            margin: 5px;
+            cursor: pointer;
+            background: #444;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #555;
+        }
+        .dice-result {
+            font-size: 18px;
+            margin: 10px;
+            background: #333;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #555;
+        }
+        .dice-result div {
+            margin: 5px 0;
+        }
+        #total {
+            font-size: 20px;
+            margin-top: 20px;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
-
     <h2>Rolador de Dados 3D</h2>
 
     <div class="controls">
@@ -112,26 +110,160 @@
     </div>
 
     <h3>Resultados:</h3>
-    <div class="dice-container" id="result"></div>
+    <canvas id="diceCanvas"></canvas>
+    <div id="diceResults" class="dice-result"></div>
     <h3 id="total"></h3>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script>
         let npcNames = [];
+        let scene, camera, renderer, dice = [];
+        let isRolling = false;
 
+        // Configurar Three.js
+        function initThreeJS() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / 500, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('diceCanvas'), antialias: true });
+            renderer.setSize(window.innerWidth, 500);
+            camera.position.z = 12;
+
+            // Adicionar luz
+            const light = new THREE.DirectionalLight(0xffffff, 1.0);
+            light.position.set(5, 5, 5);
+            scene.add(light);
+            const ambientLight = new THREE.AmbientLight(0x808080);
+            scene.add(ambientLight);
+        }
+
+        // Função para criar textura com pontos ajustada para cores
+        function createDotTexture(number, bgColor, dotColor) {
+            const size = 256;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, size, size);
+            ctx.fillStyle = dotColor;
+            const dotSize = size / 10;
+
+            // Desenhar pontos conforme o número da face
+            const positions = {
+                1: [[size / 2, size / 2]],
+                2: [[size / 4, size / 4], [3 * size / 4, 3 * size / 4]],
+                3: [[size / 4, size / 4], [size / 2, size / 2], [3 * size / 4, 3 * size / 4]],
+                4: [[size / 4, size / 4], [size / 4, 3 * size / 4], [3 * size / 4, size / 4], [3 * size / 4, 3 * size / 4]],
+                5: [[size / 4, size / 4], [size / 4, 3 * size / 4], [size / 2, size / 2], [3 * size / 4, size / 4], [3 * size / 4, 3 * size / 4]],
+                6: [[size / 4, size / 4], [size / 4, size / 2], [size / 4, 3 * size / 4], [3 * size / 4, size / 4], [3 * size / 4, size / 2], [3 * size / 4, 3 * size / 4]]
+            };
+
+            if (positions[number]) {
+                positions[number].forEach(([x, y]) => {
+                    ctx.beginPath();
+                    ctx.arc(x, y, dotSize, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // Criar um dado D6 com pontos nas faces e cores alternadas
+        function createDie(dieIndex, totalDice) {
+            const geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5); // Dados maiores
+            const isEven = dieIndex % 2 === 0;
+            const materials = [
+                new THREE.MeshStandardMaterial({ map: createDotTexture(1, isEven ? '#ffffff' : '#ff0000', isEven ? '#000000' : '#ffffff') }), // Face 1
+                new THREE.MeshStandardMaterial({ map: createDotTexture(6, isEven ? '#ffffff' : '#ff0000', isEven ? '#000000' : '#ffffff') }), // Face 6
+                new THREE.MeshStandardMaterial({ map: createDotTexture(3, isEven ? '#ffffff' : '#ff0000', isEven ? '#000000' : '#ffffff') }), // Face 3
+                new THREE.MeshStandardMaterial({ map: createDotTexture(4, isEven ? '#ffffff' : '#ff0000', isEven ? '#000000' : '#ffffff') }), // Face 4
+                new THREE.MeshStandardMaterial({ map: createDotTexture(2, isEven ? '#ffffff' : '#ff0000', isEven ? '#000000' : '#ffffff') }), // Face 2
+                new THREE.MeshStandardMaterial({ map: createDotTexture(5, isEven ? '#ffffff' : '#ff0000', isEven ? '#000000' : '#ffffff') })  // Face 5
+            ];
+            const die = new THREE.Mesh(geometry, materials);
+            die.rotationSpeed = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * 0.2,
+                (Math.random() - 0.5) * 0.2
+            );
+
+            // Posicionar dados em uma grade para evitar sobreposição
+            const cols = Math.ceil(Math.sqrt(totalDice));
+            const spacing = 3.5;
+            die.position.x = (dieIndex % cols) * spacing - (cols * spacing / 2) + spacing / 2;
+            die.position.y = Math.floor(dieIndex / cols) * -spacing + (Math.floor(totalDice / cols) * spacing / 2) - spacing / 2;
+            die.position.z = 0;
+
+            scene.add(die);
+            return die;
+        }
+
+        // Determinar a face do dado voltada para a tela (eixo Z positivo)
+        function getDieFace(die) {
+            const upVector = new THREE.Vector3(0, 0, 1); // Z positivo, em direção à câmera
+            const faces = [
+                new THREE.Vector3(1, 0, 0),   // Face 0: 1 (direita)
+                new THREE.Vector3(-1, 0, 0),  // Face 1: 6 (esquerda)
+                new THREE.Vector3(0, 1, 0),   // Face 2: 3 (cima)
+                new THREE.Vector3(0, -1, 0),  // Face 3: 4 (baixo)
+                new THREE.Vector3(0, 0, 1),   // Face 4: 2 (frente)
+                new THREE.Vector3(0, 0, -1)   // Face 5: 5 (trás)
+            ];
+            const faceNumbers = [1, 6, 3, 4, 2, 5];
+            let maxDot = -1;
+            let faceIndex = 0;
+            faces.forEach((face, index) => {
+                const worldFace = face.clone().applyQuaternion(die.quaternion);
+                const dot = worldFace.dot(upVector);
+                if (dot > maxDot) {
+                    maxDot = dot;
+                    faceIndex = index;
+                }
+            });
+            return faceNumbers[faceIndex];
+        }
+
+        // Animação de rolagem
+        function animateRoll(die, callback) {
+            let rollTime = 0;
+            const rollDuration = 120; // 2 segundos
+            function animate() {
+                if (rollTime < rollDuration) {
+                    die.rotation.x += die.rotationSpeed.x;
+                    die.rotation.y += die.rotationSpeed.y;
+                    die.rotation.z += die.rotationSpeed.z;
+                    rollTime++;
+                    requestAnimationFrame(animate);
+                } else {
+                    callback();
+                }
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+
+        // Função para adicionar NPC
         function addNPC() {
             let npcName = document.getElementById("npcName").value.trim();
             if (npcName && !npcNames.some(npc => npc.name === npcName)) {
-                npcNames.push({ name: npcName, result: "-", advantage: 0 });
+                npcNames.push({ name: npcName, result: "-", advantage: 0, rolls: [] });
                 updateNPCList();
                 document.getElementById("npcName").value = "";
+            } else if (!npcName) {
+                alert("Por favor, insira um nome para o NPC.");
+            } else {
+                alert("Este NPC já existe!");
             }
         }
 
+        // Função para remover NPC
         function removeNPC(index) {
             npcNames.splice(index, 1);
             updateNPCList();
         }
 
+        // Atualizar lista de NPCs
         function updateNPCList() {
             let npcListDiv = document.getElementById("npcList");
             npcListDiv.innerHTML = "";
@@ -139,7 +271,7 @@
                 let npcDiv = document.createElement("div");
                 npcDiv.className = "npc-entry";
                 npcDiv.innerHTML = `
-                    <span>${npc.name}: <strong>${npc.result}</strong></span>
+                    <span>${npc.name}: <strong>${npc.result}</strong> ${npc.rolls.length > 0 ? '(Rolagens: ' + npc.rolls.join(", ") + ')' : ''}</span>
                     <input type="number" class="advantage-input" 
                            value="${npc.advantage}" 
                            onchange="updateAdvantage(${index}, event)" 
@@ -150,57 +282,110 @@
             });
         }
 
+        // Atualizar vantagem
         function updateAdvantage(index, event) {
             npcNames[index].advantage = parseInt(event.target.value) || 0;
         }
 
-        function createDice(number, color) {
-            let dice = document.createElement("div");
-            dice.className = "dice";
-            dice.style.backgroundColor = color;
-            dice.innerText = number;
-            document.getElementById("result").appendChild(dice);
-        }
-
+        // Função para rolar dados
         function rollDice() {
             if (npcNames.length === 0) {
                 alert("Adicione pelo menos um NPC antes de rolar os dados.");
                 return;
             }
+            if (isRolling) return;
 
-            let total = 0;
-            document.getElementById("result").innerHTML = "";
+            isRolling = true;
+            dice.forEach(die => scene.remove(die));
+            dice = [];
+            document.getElementById("diceResults").innerHTML = "Aguardando resultados...";
+            document.getElementById("total").innerText = "Calculando...";
 
             let sides = parseInt(document.getElementById("diceType").value);
             let count = parseInt(document.getElementById("diceCount").value);
 
+            if (count < 1 || count > 10) {
+                alert("A quantidade de dados deve estar entre 1 e 10.");
+                isRolling = false;
+                return;
+            }
+
+            const totalDice = npcNames.length * count;
+            let dieIndex = 0;
+            let rollPromises = [];
+
             npcNames.forEach((npc, index) => {
-                let npcTotal = 0;
+                let npcRolls = [];
+
                 for (let i = 0; i < count; i++) {
-                    let value = Math.floor(Math.random() * sides) + 1;
-                    npcTotal += value;
-                    let color = i % 2 === 0 ? "white" : "red";
-                    createDice(value, color);
+                    if (sides === 6) { // Animação 3D para D6
+                        const die = createDie(dieIndex, totalDice);
+                        dice.push(die);
+                        rollPromises.push(
+                            new Promise(resolve => {
+                                animateRoll(die, () => {
+                                    const value = getDieFace(die);
+                                    npcRolls.push(Number(value)); // Garantir que seja número
+                                    console.log(`Rolagem para ${npc.name} (dado ${dieIndex + 1}): ${value}`);
+                                    resolve();
+                                });
+                            })
+                        );
+                        dieIndex++;
+                    } else { // Simulação numérica para outros dados
+                        const value = Math.floor(Math.random() * sides) + 1;
+                        npcRolls.push(value);
+                    }
                 }
-                // Add advantage to the NPC's total result
-                npcTotal += npc.advantage;
+
+                // Calcular total do NPC
+                let npcTotal = npcRolls.reduce((sum, val) => sum + val, 0) + npc.advantage;
                 npcNames[index].result = npcTotal;
+                npcNames[index].rolls = npcRolls;
+                console.log(`Total parcial para ${npc.name}: ${npcTotal}`);
             });
 
-            updateNPCList();
-
-            setTimeout(() => {
+            // Calcular e exibir soma total após todas as rolagens
+            Promise.all(rollPromises).then(() => {
+                let total = npcNames.reduce((sum, npc) => sum + Number(npc.result), 0); // Soma como número
+                console.log("Soma total final:", total);
+                document.getElementById("diceResults").innerHTML = "";
+                npcNames.forEach(npc => {
+                    document.getElementById("diceResults").innerHTML += `
+                        <div>${npc.name} rolou: ${npc.rolls.join(", ")}${npc.advantage > 0 ? ' + ' + npc.advantage + ' (vantagem)' : ''} = ${npc.result}</div>
+                    `;
+                });
                 document.getElementById("total").innerText = `Soma total: ${total}`;
-            }, 1000);
+                updateNPCList();
+                isRolling = false;
+            });
+
+            renderer.render(scene, camera);
         }
 
+        // Limpar dados
         function clearDice() {
-            document.getElementById("result").innerHTML = "";
+            dice.forEach(die => scene.remove(die));
+            dice = [];
+            document.getElementById("diceResults").innerHTML = "Nenhum resultado.";
             document.getElementById("total").innerText = "";
-            npcNames.forEach(npc => npc.result = "-");
+            npcNames.forEach(npc => {
+                npc.result = "-";
+                npc.rolls = [];
+            });
             updateNPCList();
+            renderer.render(scene, camera);
         }
-    </script>
 
+        // Inicializar Three.js
+        initThreeJS();
+
+        // Loop de renderização
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
 </body>
 </html>
